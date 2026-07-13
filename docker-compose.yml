@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: ankane/pgvector:latest
+    container_name: enterprise_vector_postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: rag_admin
+      POSTGRES_PASSWORD: SuperSecurePassword123!
+      POSTGRES_DB: ai_enterprise_db
+    volumes:
+      - pgvector_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  pgvector_data:

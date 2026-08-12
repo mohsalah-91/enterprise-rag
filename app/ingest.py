@@ -1,53 +1,59 @@
-import re
-from typing import List, Dict, Any
+import openai
 from openai import AsyncOpenAI
+from fastapi import HTTPException
 from app.config import settings
 
-# Initialize the asynchronous OpenAI client using our validated config settings
+# Initialize the asynchronous OpenAI client
 openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+
 
 class IngestionService:
     @staticmethod
-    def chunk_text(text: str, chunk_size: int = 500, chunk_overlap: int = 50) -> List[str]:
+    def chunk_text(text: str, chunk_size: int = 500, chunk_overlap: int = 50) -> list[str]:
         """
-        Splits raw document string data into clean semantic chunks with an explicit overlap threshold.
-        Ensures contextual continuity across chunk boundaries.
+        Splits a larger text string into smaller, overlapping semantic blocks.
         """
-        # Clean up excessive whitespace characters
-        clean_text = re.sub(r'\s+', ' ', text).strip()
-        words = clean_text.split(' ')
-        
+        words = text.split()
         chunks = []
-        import_index = 0
         
-        while import_index < len(words):
-            # Take a slice of words based on the chunk size
-            word_slice = words[import_index : import_index + chunk_size]
-            chunk_content = " ".join(word_slice)
-            chunks.append(chunk_content)
+        for i in range(0, len(words), chunk_size - chunk_overlap):
+            chunk_words = words[i:i + chunk_size]
+            chunk_text = " ".join(chunk_words)
+            chunks.append(chunk_text)
             
-            # Slide the window forward by chunk_size minus the overlap
-            import_index += (chunk_size - chunk_overlap)
-            
-            # Fail-safe break to prevent infinite loops if misconfigured
-            if chunk_size <= chunk_overlap:
+            # Stop if we've reached the end of the text
+            if i + chunk_size >= len(words):
                 break
                 
         return chunks
 
     @staticmethod
-    async def generate_embeddings(text_chunks: List[str]) -> List[List[float]]:
+    async def generate_embeddings(chunks: list[str]) -> list[list[float]]:
         """
-        Dispatches text chunks to the OpenAI API concurrently to generate high-dimensional vector embeddings.
+        Sends chunks to OpenAI to generate 1536-dimensional vectors.
         """
-        # Safeguard against empty payloads
-        if not text_chunks:
-            return []
-            
+        try:
+            response = await openai_client.embeddings.create(
+                model=settings.EMBEDDING_MODEL,
+                input=chunks
+            )
+            return [data.embedding for data in response.data]
+        except Exception as e:
+            raise Exception(f"Failed to generate embeddings from OpenAI: {str(e)}")
+
+
+async def generate_query_embedding(query_text: str) -> list[float]:
+    """
+    Generates a single vector embedding for a user's search query.
+    """
+    try:
         response = await openai_client.embeddings.create(
-            input=text_chunks,
-            model=settings.EMBEDDING_MODEL
+            model=settings.EMBEDDING_MODEL,
+            input=query_text
         )
-        
-        # Extract the float arrays from the response payload sorted by original index
-        return [data.embedding for data in response.data]
+        return response.data[0].embedding
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"OpenAI embedding search failure: {str(e)}"
+        )

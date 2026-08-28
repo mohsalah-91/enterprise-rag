@@ -18,9 +18,11 @@ class AppSettings(BaseSettings):
     # Provider Secrets
     OPENAI_API_KEY: str = Field(..., description="Bearer token for OpenAI model endpoints.")
     ANTHROPIC_API_KEY: str = Field(..., description="Bearer token for Anthropic Claude endpoints.")
-    
+    COHERE_API_KEY: str = Field(..., description="Bearer token for Cohere rerank endpoints.")
+
     # AI Engine Model Defaults
     EMBEDDING_MODEL: str = "text-embedding-3-small"
+    RERANK_MODEL: str = "rerank-v3.5"
     RAG_DEFAULT_TOP_K: int = Field(default=3, ge=1, le=10)
 
     # Instruct Pydantic to read directly from your local .env file

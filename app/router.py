@@ -230,22 +230,16 @@ async def search_documents(
     return await _hybrid_search_and_rerank(payload.query, payload.limit, pool)
 
 
-@router.post("/answer", response_model=AnswerResponse, status_code=status.HTTP_200_OK)
-async def answer_query(
-    payload: AnswerRequest,
-    pool = Depends(get_db_pool)
-):
+async def _synthesize_answer(query: str, retrieved_context: List[SearchResultResponse]) -> AnswerResponse:
     """
-    Answers a natural-language query by retrieving the most relevant document
-    chunks via hybrid search + Cohere reranking, then synthesizing a grounded
-    answer with Claude, citing the source chunks it drew from.
+    Step B + Step C of the answer pipeline: builds a strictly-grounded system
+    prompt from the retrieved chunks and calls Claude to synthesize a cited answer.
+    Shared by the /answer HTTP endpoint and the MCP `query_enterprise_rag` tool
+    so both surfaces stay identical.
     """
-    # Step A: Hybrid search + Cohere rerank to get the top N relevant chunks
-    retrieved_context = await _hybrid_search_and_rerank(payload.query, payload.top_k, pool)
-
     if not retrieved_context:
         return AnswerResponse(
-            query=payload.query,
+            query=query,
             answer="I could not find any relevant information in the knowledge base to answer this query.",
             retrieved_context=[],
             model_used=settings.ANSWER_MODEL
@@ -273,7 +267,7 @@ async def answer_query(
             model=settings.ANSWER_MODEL,
             max_tokens=2048,
             system=system_prompt,
-            messages=[{"role": "user", "content": payload.query}]
+            messages=[{"role": "user", "content": query}]
         )
     except Exception as e:
         raise HTTPException(
@@ -284,8 +278,23 @@ async def answer_query(
     answer_text = next((block.text for block in response.content if block.type == "text"), "")
 
     return AnswerResponse(
-        query=payload.query,
+        query=query,
         answer=answer_text,
         retrieved_context=retrieved_context,
         model_used=settings.ANSWER_MODEL
     )
+
+
+@router.post("/answer", response_model=AnswerResponse, status_code=status.HTTP_200_OK)
+async def answer_query(
+    payload: AnswerRequest,
+    pool = Depends(get_db_pool)
+):
+    """
+    Answers a natural-language query by retrieving the most relevant document
+    chunks via hybrid search + Cohere reranking, then synthesizing a grounded
+    answer with Claude, citing the source chunks it drew from.
+    """
+    # Step A: Hybrid search + Cohere rerank to get the top N relevant chunks
+    retrieved_context = await _hybrid_search_and_rerank(payload.query, payload.top_k, pool)
+    return await _synthesize_answer(payload.query, retrieved_context)

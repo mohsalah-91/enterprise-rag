@@ -12,19 +12,6 @@ async def lifespan(app: FastAPI):
     # Action on startup: Open connection pool
     await pool.open()
     
-    # Ensure pgvector extension is explicitly initialized in the target DB schema
-    async with pool.connection() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-            await conn.commit()
-            
-    yield
-    # Action on shutdown: Cleanly close pool hooks
-    await pool.close()@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Action on startup: Open connection pool
-    await pool.open()
-    
     # Ensure pgvector extension and structural tables are initialized
     async with pool.connection() as conn:
         async with conn.cursor() as cur:
@@ -49,7 +36,8 @@ async def lifespan(app: FastAPI):
     yield
     # Action on shutdown: Cleanly close pool hooks
     await pool.close()
-    # Add this function to the bottom of app/database.py
+
+
 async def get_db_pool():
     """
     Dependency helper to yield our database connection pool.

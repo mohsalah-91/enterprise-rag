@@ -23,6 +23,7 @@ class AppSettings(BaseSettings):
     # AI Engine Model Defaults
     EMBEDDING_MODEL: str = "text-embedding-3-small"
     RERANK_MODEL: str = "rerank-v3.5"
+    ANSWER_MODEL: str = "claude-sonnet-5"
     RAG_DEFAULT_TOP_K: int = Field(default=3, ge=1, le=10)
 
     # Instruct Pydantic to read directly from your local .env file

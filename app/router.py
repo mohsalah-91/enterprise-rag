@@ -1,5 +1,6 @@
 from typing import Optional, List
 import cohere
+from anthropic import AsyncAnthropic
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from app.config import settings
@@ -11,6 +12,9 @@ router = APIRouter(prefix="/documents", tags=["Documents"])
 
 # Async Cohere client for reranking (non-blocking, safe to call from async endpoints)
 cohere_client = cohere.AsyncClientV2(api_key=settings.COHERE_API_KEY)
+
+# Async Anthropic client for answer synthesis (non-blocking, safe to call from async endpoints)
+anthropic_client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
 
 
 # =====================================================================
@@ -36,6 +40,18 @@ class SearchResultResponse(BaseModel):
     chunk_index: int
     rrf_score: float
     rerank_score: float
+
+
+class AnswerRequest(BaseModel):
+    query: str = Field(..., min_length=3, description="The natural-language question to answer")
+    top_k: int = Field(3, ge=1, le=10, description="Max number of reranked chunks to use as context")
+
+
+class AnswerResponse(BaseModel):
+    query: str
+    answer: str
+    retrieved_context: List[SearchResultResponse]
+    model_used: str
 
 
 # =====================================================================
@@ -98,11 +114,7 @@ async def ingest_document(
     }
 
 
-@router.post("/search", response_model=List[SearchResultResponse], status_code=status.HTTP_200_OK)
-async def search_documents(
-    payload: SearchQueryRequest,
-    pool = Depends(get_db_pool)
-):
+async def _hybrid_search_and_rerank(query: str, limit: int, pool) -> List[SearchResultResponse]:
     """
     Executes Hybrid Search combining Dense Vector Search (pgvector) and
     Sparse Lexical Search (Postgres tsvector/BM25) using Reciprocal Rank Fusion (RRF),
@@ -112,8 +124,8 @@ async def search_documents(
     rrf_k = 60.0  # Standard smoothing constant for RRF
 
     # 1. Generate query embedding for vector path
-    query_vector = await generate_query_embedding(payload.query)
-    
+    query_vector = await generate_query_embedding(query)
+
     # 2. Parallel Queries: Vector + Full-Text Search
     vector_sql = """
         SELECT id, title, content, chunk_index
@@ -139,7 +151,7 @@ async def search_documents(
                 vector_rows = await cur.fetchall()
 
                 # Execute Lexical Search
-                await cur.execute(lexical_sql, (payload.query, payload.query, candidate_fetch_limit))
+                await cur.execute(lexical_sql, (query, query, candidate_fetch_limit))
                 lexical_rows = await cur.fetchall()
 
         # 3. Compute Reciprocal Rank Fusion (RRF)
@@ -177,9 +189,9 @@ async def search_documents(
     try:
         rerank_response = await cohere_client.rerank(
             model=settings.RERANK_MODEL,
-            query=payload.query,
+            query=query,
             documents=[doc_map[doc_id]["content"] for doc_id, _ in candidates],
-            top_n=payload.limit
+            top_n=limit
         )
     except Exception as e:
         raise HTTPException(
@@ -203,3 +215,77 @@ async def search_documents(
         )
 
     return results
+
+
+@router.post("/search", response_model=List[SearchResultResponse], status_code=status.HTTP_200_OK)
+async def search_documents(
+    payload: SearchQueryRequest,
+    pool = Depends(get_db_pool)
+):
+    """
+    Executes Hybrid Search combining Dense Vector Search (pgvector) and
+    Sparse Lexical Search (Postgres tsvector/BM25) using Reciprocal Rank Fusion (RRF),
+    then reranks the fused candidate pool with Cohere's rerank-v3.5 model.
+    """
+    return await _hybrid_search_and_rerank(payload.query, payload.limit, pool)
+
+
+@router.post("/answer", response_model=AnswerResponse, status_code=status.HTTP_200_OK)
+async def answer_query(
+    payload: AnswerRequest,
+    pool = Depends(get_db_pool)
+):
+    """
+    Answers a natural-language query by retrieving the most relevant document
+    chunks via hybrid search + Cohere reranking, then synthesizing a grounded
+    answer with Claude, citing the source chunks it drew from.
+    """
+    # Step A: Hybrid search + Cohere rerank to get the top N relevant chunks
+    retrieved_context = await _hybrid_search_and_rerank(payload.query, payload.top_k, pool)
+
+    if not retrieved_context:
+        return AnswerResponse(
+            query=payload.query,
+            answer="I could not find any relevant information in the knowledge base to answer this query.",
+            retrieved_context=[],
+            model_used=settings.ANSWER_MODEL
+        )
+
+    # Step B: Build a strictly-grounded system prompt with citation instructions
+    context_blocks = "\n\n".join(
+        f"[Chunk ID: {chunk.id} | Title: {chunk.title} | Chunk Index: {chunk.chunk_index}]\n{chunk.content}"
+        for chunk in retrieved_context
+    )
+
+    system_prompt = (
+        "You are an enterprise document assistant. Answer the user's query using ONLY the "
+        "information contained in the context chunks provided below. Do not use any prior "
+        "or outside knowledge. If the context does not contain enough information to answer "
+        "the query, say so explicitly instead of guessing. When you use information from a "
+        "chunk, cite it inline using its Chunk ID or Title (e.g., \"(Source: Chunk ID 12, "
+        "'Q2 Financial Report')\").\n\n"
+        f"Context:\n{context_blocks}"
+    )
+
+    # Step C: Call the Anthropic Messages API to synthesize the grounded answer
+    try:
+        response = await anthropic_client.messages.create(
+            model=settings.ANSWER_MODEL,
+            max_tokens=2048,
+            system=system_prompt,
+            messages=[{"role": "user", "content": payload.query}]
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Anthropic answer synthesis failure: {str(e)}"
+        )
+
+    answer_text = next((block.text for block in response.content if block.type == "text"), "")
+
+    return AnswerResponse(
+        query=payload.query,
+        answer=answer_text,
+        retrieved_context=retrieved_context,
+        model_used=settings.ANSWER_MODEL
+    )

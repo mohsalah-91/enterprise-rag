@@ -1,8 +1,14 @@
 import os
+import sys
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from psycopg_pool import AsyncConnectionPool
 from app.config import settings
+
+# psycopg's async pool cannot run under Windows' default ProactorEventLoop.
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 # Initialize a non-blocking, async connection pool for high-throughput enterprise performance
 pool = AsyncConnectionPool(conninfo=settings.DATABASE_URL, open=False)

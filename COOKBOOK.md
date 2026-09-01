@@ -33,6 +33,40 @@ This pipeline is exposed two ways:
 | `query_enterprise_rag` | `query: str`, `top_k: int = 3` | `{query, answer, retrieved_context, model_used}` |
 | `search_raw_chunks` | `query: str` | List of reranked chunks (`id`, `title`, `content`, `chunk_index`, `rrf_score`, `rerank_score`) |
 
+## Security: PreToolUse Validation
+
+Both MCP tools run a `validate_mcp_input()` check (`app/hooks/pre_tool_use.py`)
+before touching the database or an LLM — a PreToolUse hook, in the same sense
+as Claude Code's own lifecycle hooks: code that runs *before* a tool executes
+and can block it. It enforces:
+
+- **Length limit** — `query` must be a non-empty string, max 500 characters.
+- **SQL injection patterns** — rejects payloads matching common markers
+  (`UNION SELECT`, `DROP TABLE`, `' OR '1'='1`, `xp_cmdshell`, etc.). This is
+  defense-in-depth: the actual SQL in `_hybrid_search_and_rerank` is already
+  parameterized (`psycopg` `%s` placeholders), so it isn't injectable, but a
+  request that *looks* like an injection attempt is rejected outright rather
+  than silently passed through as a literal search string.
+- **Prompt injection patterns** — rejects payloads that try to override the
+  system prompt in `_synthesize_answer` (`"ignore previous instructions"`,
+  `"reveal your system prompt"`, `"you are now a..."`, etc.).
+
+On failure, the tool raises before any DB query, Cohere call, or Claude call
+runs, and MCP surfaces it as a normal tool error (`isError: true`) — the
+client sees a clear rejection reason, not a crash:
+
+```json
+{
+  "isError": true,
+  "content": [{"type": "text", "text": "Error executing tool search_raw_chunks: [search_raw_chunks] 'query' rejected: matched a SQL injection payload pattern."}]
+}
+```
+
+To extend the checks (e.g. add more patterns, validate `top_k` bounds),
+edit `_SQL_INJECTION_PATTERNS` / `_PROMPT_INJECTION_PATTERNS` or add new
+checks to `validate_mcp_input()` in `app/hooks/pre_tool_use.py` — both tools
+call the same function, so a new rule protects both immediately.
+
 ## Registering the Server
 
 The server runs over **Streamable HTTP**, not stdio. On Windows, the stdio

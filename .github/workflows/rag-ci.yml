@@ -1,0 +1,101 @@
+name: RAG CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-mcp-server:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+      # Required repo secrets (Settings -> Secrets and variables -> Actions):
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
+      MCP_SERVER_PORT: 8000
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Set up Node.js (for Claude Code CLI)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Launch MCP server (Streamable HTTP, port 8000)
+        run: nohup python mcp_server.py > mcp_server.log 2>&1 &
+
+      - name: Wait for MCP server to be reachable
+        run: |
+          for i in $(seq 1 30); do
+            if (echo > /dev/tcp/127.0.0.1/$MCP_SERVER_PORT) >/dev/null 2>&1; then
+              echo "MCP server is up on port $MCP_SERVER_PORT"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::MCP server did not become reachable on port $MCP_SERVER_PORT"
+          cat mcp_server.log || true
+          exit 1
+
+      - name: Apply full-text-search migration and seed a test document
+        run: python scripts/ci_seed_test_data.py
+
+      - name: Register the MCP server with Claude Code
+        run: claude mcp add --transport http enterprise-rag http://127.0.0.1:8000/mcp
+
+      - name: Query the RAG pipeline via query_enterprise_rag over HTTP
+        run: |
+          claude -p "Use query_enterprise_rag over HTTP to ask 'What vector index types are supported?' and verify the response." \
+            --allowedTools "mcp__enterprise-rag__query_enterprise_rag" \
+            | tee claude_response.txt
+
+      - name: Verify the response reflects real retrieval, not a hallucination
+        run: |
+          if ! grep -qi "hnsw" claude_response.txt; then
+            echo "::error::Response did not mention the expected vector index type (HNSW) from the seeded test document."
+            exit 1
+          fi
+          if ! grep -q "CallToolRequest" mcp_server.log; then
+            echo "::error::MCP server log shows no CallToolRequest -- the tool was never actually invoked."
+            exit 1
+          fi
+          echo "Verified: query_enterprise_rag was invoked and returned a grounded answer."
+
+      - name: Upload MCP server log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-server-log
+          path: mcp_server.log

@@ -18,6 +18,7 @@ from mcp.server.fastmcp import FastMCP
 
 from app.config import settings
 from app.database import lifespan, pool
+from app.hooks.pre_tool_use import validate_mcp_input
 from app.router import SearchResultResponse, _hybrid_search_and_rerank, _synthesize_answer
 
 mcp = FastMCP("enterprise-rag", lifespan=lifespan, host="127.0.0.1", port=8765)
@@ -44,6 +45,10 @@ async def query_enterprise_rag(query: str, top_k: int = 3) -> Dict[str, Any]:
     Returns:
         A dict with `query`, `answer`, `retrieved_context`, and `model_used`.
     """
+    validation = validate_mcp_input("query_enterprise_rag", {"query": query, "top_k": top_k})
+    if not validation.is_valid:
+        raise ValueError(validation.message)
+
     retrieved_context = await _hybrid_search_and_rerank(query, top_k, pool)
     answer = await _synthesize_answer(query, retrieved_context)
     return answer.model_dump()
@@ -62,6 +67,10 @@ async def search_raw_chunks(query: str) -> List[Dict[str, Any]]:
         A list of reranked chunk dicts (id, title, content, chunk_index,
         rrf_score, rerank_score).
     """
+    validation = validate_mcp_input("search_raw_chunks", {"query": query})
+    if not validation.is_valid:
+        raise ValueError(validation.message)
+
     results = await _hybrid_search_and_rerank(query, settings.RAG_DEFAULT_TOP_K, pool)
     return _serialize_chunks(results)
 

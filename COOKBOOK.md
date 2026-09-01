@@ -35,6 +35,22 @@ This pipeline is exposed two ways:
 
 ## Registering the Server
 
+The server runs over **Streamable HTTP**, not stdio. On Windows, the stdio
+transport in the `mcp` Python SDK reliably hangs the moment a tool makes an
+outbound async HTTP call (OpenAI/Cohere/Anthropic) — reproducible independent
+of event-loop policy, DB access, or client construction timing, and matches a
+known, long-standing category of unresolved Windows stdio issues in the SDK's
+own tracker (e.g. GH #2832, #2653). Streamable HTTP runs on the same async
+stack this repo's FastAPI app already uses reliably, and does not hang.
+
+**Start the server first** (it must already be running — HTTP transport isn't
+spawned on demand by the client the way stdio is):
+
+```bash
+python mcp_server.py
+# INFO:     Uvicorn running on http://127.0.0.1:8765 (Press CTRL+C to quit)
+```
+
 ### Claude Code
 
 Claude Code auto-discovers project-scoped MCP servers from a file named
@@ -43,7 +59,7 @@ same contents — either rename/copy it to `.mcp.json`, or register it directly
 with the CLI:
 
 ```bash
-claude mcp add enterprise-rag -- python mcp_server.py
+claude mcp add --transport http enterprise-rag http://127.0.0.1:8765/mcp
 ```
 
 Verify it's registered:
@@ -58,42 +74,34 @@ claude mcp list
 {
   "mcpServers": {
     "enterprise-rag": {
-      "command": "python",
-      "args": ["mcp_server.py"],
-      "env": {}
+      "type": "http",
+      "url": "http://127.0.0.1:8765/mcp"
     }
   }
 }
 ```
 
-> Make sure `python` on `PATH` resolves to the project's virtualenv (activate
-> `venv` first), or replace `"command"` with the absolute path to
-> `venv/Scripts/python.exe` (Windows) / `venv/bin/python` (macOS/Linux), and
-> ensure `DATABASE_URL`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and
-> `COHERE_API_KEY` are available in the server's environment (via `.env` or
-> the config's `"env"` block).
+> Port 8765 is chosen to avoid colliding with the FastAPI app, which defaults
+> to `:8000` under `uvicorn`. Both can run at the same time.
 
 ### Claude Desktop
 
-Add the same block to Claude Desktop's config file
+Add the same `mcpServers` block to Claude Desktop's config file
 (`claude_desktop_config.json` — under `%APPDATA%\Claude\` on Windows or
-`~/Library/Application Support/Claude/` on macOS), then restart Claude
-Desktop.
+`~/Library/Application Support/Claude/` on macOS), with `mcp_server.py`
+already running, then restart Claude Desktop.
 
 ## Example: Invoking a Tool from Python
 
+Requires `mcp_server.py` to already be running (see above).
+
 ```python
 import asyncio
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
-
-server_params = StdioServerParameters(
-    command="python",
-    args=["mcp_server.py"],
-)
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
 
 async def main():
-    async with stdio_client(server_params) as (read, write):
+    async with streamablehttp_client("http://127.0.0.1:8765/mcp") as (read, write, _):
         async with ClientSession(read, write) as session:
             await session.initialize()
 
@@ -110,9 +118,9 @@ asyncio.run(main())
 
 ```bash
 pip install -r requirements.txt
-python mcp_server.py          # runs over stdio for local MCP clients
-# or
-uvicorn app.main:app --reload # runs the FastAPI HTTP surface
+python mcp_server.py          # runs the MCP server on http://127.0.0.1:8765/mcp
+# or, separately
+uvicorn app.main:app --reload # runs the FastAPI HTTP surface on :8000
 ```
 
 Both entry points share the same `document_chunks` table, connection pool

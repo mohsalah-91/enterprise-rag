@@ -2,8 +2,15 @@
 MCP server exposing the Enterprise RAG pipeline (pgvector + BM25 hybrid search,
 Cohere rerank, Claude answer synthesis) as tools for Claude Code / Claude Desktop.
 
-Run directly for local stdio use:
+Runs over Streamable HTTP rather than stdio: the stdio transport reliably hangs
+on Windows once a tool makes an outbound async HTTP call (OpenAI/Cohere/Anthropic),
+regardless of event loop policy -- see the mcp Python SDK's Windows stdio issues
+(e.g. GH #2832, #2653). Streamable HTTP uses the same async stack this repo's
+FastAPI app already runs fine on, and does not exhibit the hang.
+
+Run directly:
     python mcp_server.py
+Serves at http://127.0.0.1:8765/mcp
 """
 from typing import Any, Dict, List
 
@@ -13,7 +20,7 @@ from app.config import settings
 from app.database import lifespan, pool
 from app.router import SearchResultResponse, _hybrid_search_and_rerank, _synthesize_answer
 
-mcp = FastMCP("enterprise-rag", lifespan=lifespan)
+mcp = FastMCP("enterprise-rag", lifespan=lifespan, host="127.0.0.1", port=8765)
 
 
 def _serialize_chunks(chunks: List[SearchResultResponse]) -> List[Dict[str, Any]]:
@@ -60,4 +67,4 @@ async def search_raw_chunks(query: str) -> List[Dict[str, Any]]:
 
 
 if __name__ == "__main__":
-    mcp.run()
+    mcp.run(transport="streamable-http")

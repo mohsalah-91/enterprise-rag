@@ -1,6 +1,6 @@
 ALTER TABLE document_chunks ADD COLUMN IF NOT EXISTS fts_tokens tsvector;
 
-UPDATE document_chunks SET fts_tokens = to_tsvector('english', coalesce(title, '') || ' ' || coalesce(content, ''));
+UPDATE document_chunks SET fts_tokens = to_tsvector('english', coalesce(title, '') || ' ' || coalesce(content, '')) WHERE fts_tokens IS NULL;
 
 CREATE INDEX IF NOT EXISTS idx_fts_tokens ON document_chunks USING gin(fts_tokens);
 

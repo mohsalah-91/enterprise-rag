@@ -9,3 +9,9 @@ ENV/
 # Python cache files
 __pycache__/
 *.pyc
+
+# Corpus and data files
+corpus/
+
+# Local agent tooling config
+.codex/

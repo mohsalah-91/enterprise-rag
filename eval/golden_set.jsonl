@@ -1,0 +1,3 @@
+{"id": "q001", "question": "does one allow policy on either pods, source or destination, suffice to allow communications between the pods?", "must_contain": ["ingress policy on the destination"], "source_doc": "services-networking/network-policies.md", "type": "semantic"}
+{"id": "q002", "question": "which takes precedence as a hostname for a pod, the name of the pod or the pod's spec.hostname field?", "must_contain": ["over the Pod's name"], "source_doc": "services-networking/dns-pod-service.md", "type": "keyword"}
+{"id": "q003", "question": "how does FlowSchema match inbound requests?", "must_contain": [], "source_doc": null, "type": "no_answer"}

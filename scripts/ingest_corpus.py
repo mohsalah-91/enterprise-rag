@@ -1,8 +1,10 @@
 from pathlib import Path
+import os
 import requests
 import frontmatter
 
 corpus_path = Path(__file__).resolve().parent.parent / "corpus"
+ingest_url = os.environ.get("INGEST_URL", "http://127.0.0.1:8000") + "/documents/ingest"
 failures = []
 skipped_files = []
 ingested_files = []
@@ -21,7 +23,7 @@ for path in corpus_path.rglob("*.md"):
             skipped_files.append(relative_title)
             continue
         response = requests.post(
-            "http://127.0.0.1:8000/documents/ingest", 
+            ingest_url,
             json={"title": relative_title,"content": content},
             timeout = 120
             )

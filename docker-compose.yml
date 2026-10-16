@@ -8,7 +8,7 @@ services:
       - "5432:5432"
     environment:
       POSTGRES_USER: rag_admin
-      POSTGRES_PASSWORD: SuperSecurePassword123!
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ai_enterprise_db
     volumes:
       - pgvector_data:/var/lib/postgresql/data

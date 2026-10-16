@@ -41,16 +41,19 @@ pip install -r requirements.txt
 docker compose up -d
 ```
 
-Create a `.env` in the repo root:
+Copy `.env.example` to `.env` in the repo root and fill in your keys and a
+local database password:
 
 ```
+POSTGRES_PASSWORD=CHANGE_ME
 DATABASE_URL=postgresql://rag_admin:CHANGE_ME@localhost:5432/ai_enterprise_db
 OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
 COHERE_API_KEY=...
 ```
 
-Set the same password in `docker-compose.yml` via `POSTGRES_PASSWORD`.
+`docker compose` reads `POSTGRES_PASSWORD` from `.env`; use the same password
+in `DATABASE_URL`. Create `.env` before running `docker compose up -d`.
 
 Start the HTTP API:
 
@@ -74,6 +77,35 @@ curl -X POST http://127.0.0.1:8000/documents/answer \
 
 Interactive API docs are at `http://127.0.0.1:8000/docs`.
 
+## Run in Docker or Azure
+
+Build the API image from the repository root:
+
+```bash
+docker build -t enterprise-rag-api .
+docker run --rm -p 8000:8000 --env-file .env enterprise-rag-api
+```
+
+If your network blocks public PyPI, point the build at a package mirror with
+`--build-arg PIP_INDEX_URL=https://<mirror>/simple/`.
+
+The container listens on `HOST=0.0.0.0` and `PORT=8000` by default. Override
+either environment variable to match your platform. On Azure App Service, set
+the `WEBSITES_PORT` app setting to the same value as `PORT` (both default to
+`8000`) so App Service routes traffic to the right container port. On Azure
+Container Apps, set the ingress target port to `PORT`. The image runs as a
+non-root user and does not include local secrets, source control metadata, or
+development fixtures.
+
+Provide `DATABASE_URL`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and
+`COHERE_API_KEY` as app settings or secrets; the image does not contain a
+`.env` file. Migrations run on startup, so the database must be reachable
+when the container starts.
+
+Use `GET /health` as the liveness probe. It returns `{"status": "healthy"}`
+and deliberately avoids database and AI-provider calls, so it can be used by
+Azure while the service is being monitored.
+
 ## HTTP endpoints
 
 | Method | Path | Purpose |
@@ -82,6 +114,7 @@ Interactive API docs are at `http://127.0.0.1:8000/docs`.
 | `POST` | `/documents/search` | Hybrid search + rerank, returns scored chunks |
 | `POST` | `/documents/answer` | Search, rerank, then synthesize a cited answer |
 | `GET` | `/` | Service status |
+| `GET` | `/health` | Liveness probe |
 
 ## MCP tools
 

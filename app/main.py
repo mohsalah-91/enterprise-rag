@@ -12,6 +12,13 @@ app = FastAPI(
 # Attach ingestion endpoints to the application core
 app.include_router(document_router)
 
+
+@app.get("/health", status_code=status.HTTP_200_OK, include_in_schema=False)
+async def health_check():
+    """Liveness probe that does not depend on the database or AI providers."""
+    return {"status": "healthy"}
+
+
 @app.get("/", status_code=status.HTTP_200_OK)
 async def get_system_status():
     """Returns application metadata safely without exposing secret keys."""

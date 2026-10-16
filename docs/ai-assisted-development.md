@@ -1,0 +1,1 @@
+ran /init to initiate agents.md file and requested not to commit secrets or run kubectl against live Azure

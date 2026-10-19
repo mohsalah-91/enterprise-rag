@@ -11,7 +11,7 @@ FastAPI app already runs fine on, and does not exhibit the hang.
 Run directly:
     python mcp_server.py
 Serves at http://127.0.0.1:8765/mcp by default; override with the
-MCP_SERVER_PORT environment variable (e.g. for CI).
+MCP_HOST and MCP_SERVER_PORT environment variables (e.g. for CI).
 """
 import os
 from typing import Any, Dict, List
@@ -24,8 +24,9 @@ from app.hooks.pre_tool_use import validate_mcp_input
 from app.router import SearchResultResponse, _hybrid_search_and_rerank, _synthesize_answer
 
 MCP_SERVER_PORT = int(os.environ.get("MCP_SERVER_PORT", "8765"))
+MCP_HOST = os.environ.get("MCP_HOST", "127.0.0.1")
 
-mcp = FastMCP("enterprise-rag", lifespan=lifespan, host="127.0.0.1", port=MCP_SERVER_PORT)
+mcp = FastMCP("enterprise-rag", lifespan=lifespan, host=MCP_HOST, port=MCP_SERVER_PORT)
 
 
 def _serialize_chunks(chunks: List[SearchResultResponse]) -> List[Dict[str, Any]]:

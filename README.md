@@ -77,34 +77,32 @@ curl -X POST http://127.0.0.1:8000/documents/answer \
 
 Interactive API docs are at `http://127.0.0.1:8000/docs`.
 
-## Run in Docker or Azure
+## Run the MCP server in Docker
 
-Build the API image from the repository root:
+Build the MCP image from the repository root and connect an MCP client to its
+Streamable HTTP endpoint:
 
 ```bash
-docker build -t enterprise-rag-api .
-docker run --rm -p 8000:8000 --env-file .env enterprise-rag-api
+docker build -t enterprise-rag-mcp .
+docker run --rm -p 8765:8765 --env-file .env enterprise-rag-mcp
+# MCP endpoint: http://127.0.0.1:8765/mcp
 ```
 
 If your network blocks public PyPI, point the build at a package mirror with
 `--build-arg PIP_INDEX_URL=https://<mirror>/simple/`.
 
-The container listens on `HOST=0.0.0.0` and `PORT=8000` by default. Override
-either environment variable to match your platform. On Azure App Service, set
-the `WEBSITES_PORT` app setting to the same value as `PORT` (both default to
-`8000`) so App Service routes traffic to the right container port. On Azure
-Container Apps, set the ingress target port to `PORT`. The image runs as a
-non-root user and does not include local secrets, source control metadata, or
-development fixtures.
+The container listens on `MCP_HOST=0.0.0.0` and `MCP_SERVER_PORT=8765` by
+default. Set `MCP_SERVER_PORT` and map the same port if your platform requires
+a different port. The image runs as a non-root user and does not include local
+secrets, source control metadata, or development fixtures.
 
 Provide `DATABASE_URL`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and
 `COHERE_API_KEY` as app settings or secrets; the image does not contain a
 `.env` file. Migrations run on startup, so the database must be reachable
 when the container starts.
 
-Use `GET /health` as the liveness probe. It returns `{"status": "healthy"}`
-and deliberately avoids database and AI-provider calls, so it can be used by
-Azure while the service is being monitored.
+The image health check makes a TCP connection to `MCP_SERVER_PORT`; MCP does
+not expose an HTTP `/health` route.
 
 ## HTTP endpoints
 

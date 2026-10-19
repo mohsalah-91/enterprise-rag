@@ -22,9 +22,9 @@ Typical local workflow:
 - `docker compose up -d` starts local Postgres with `pgvector` (requires `POSTGRES_PASSWORD` in `.env`).
 - `uvicorn app.main:app --reload` runs the API at `http://127.0.0.1:8000`.
 - `python -m unittest discover -s tests -v` runs the test suite; use `python -m unittest tests.test_health -v` while iterating.
-- `docker build -t enterprise-rag-api .` builds the deployable image.
+- `docker build -t enterprise-rag-mcp .` builds the deployable MCP image.
 
-Document any new required service, environment variable, or startup command in the README and `.env.example`.
+Document any new required service, environment variable, or startup command in the README and `.env.example`. The container serves MCP over Streamable HTTP on `MCP_HOST=0.0.0.0` and `MCP_SERVER_PORT=8765`; the local MCP server defaults to `127.0.0.1:8765`.
 
 ## Coding Style & Naming Conventions
 
